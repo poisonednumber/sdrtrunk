@@ -70,7 +70,9 @@ public class ColorThemePreference extends Preference
                 // First time - detect system theme and use as default
                 boolean systemDarkMode = isSystemInDarkMode();
                 mDarkModeEnabled = systemDarkMode;
-                mLog.info("First run - detected Windows system theme: " + (systemDarkMode ? "Dark" : "Light"));
+                // Save the detected value to preferences
+                mPreferences.putBoolean(PREFERENCE_KEY_DARK_MODE_ENABLED, systemDarkMode);
+                mLog.info("First run - detected Windows system theme: " + (systemDarkMode ? "Dark" : "Light") + " - applying as default");
             }
             else
             {
@@ -91,14 +93,17 @@ public class ColorThemePreference extends Preference
         try
         {
             String os = System.getProperty("os.name").toLowerCase();
+            mLog.info("Detecting system theme for OS: " + os);
             
             if(os.contains("win"))
             {
                 // Check Windows registry for dark mode setting
                 // HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize\AppsUseLightTheme
-                // 0 = Dark mode, 1 = Light mode
-                Process process = Runtime.getRuntime().exec(
-                    "reg query HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize /v AppsUseLightTheme");
+                // 0x0 = Dark mode, 0x1 = Light mode
+                String command = "reg query HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize /v AppsUseLightTheme";
+                mLog.info("Executing registry query: " + command);
+                
+                Process process = Runtime.getRuntime().exec(command);
                 
                 java.io.BufferedReader reader = new java.io.BufferedReader(
                     new java.io.InputStreamReader(process.getInputStream()));
@@ -106,21 +111,24 @@ public class ColorThemePreference extends Preference
                 String line;
                 while((line = reader.readLine()) != null)
                 {
+                    mLog.info("Registry output: " + line);
                     if(line.contains("AppsUseLightTheme"))
                     {
-                        // Extract the value (0 or 1)
+                        // Extract the value (0x0 or 0x1)
                         String[] parts = line.trim().split("\\s+");
                         if(parts.length >= 3)
                         {
                             String value = parts[parts.length - 1];
-                            // 0 = Dark mode, 1 = Light mode
+                            // 0x0 = Dark mode, 0x1 = Light mode
                             boolean isDark = "0x0".equals(value);
-                            mLog.info("Windows AppsUseLightTheme registry value: " + value + " (Dark mode: " + isDark + ")");
+                            mLog.info("Windows theme detected - AppsUseLightTheme=" + value + " -> " + (isDark ? "DARK MODE" : "LIGHT MODE"));
+                            reader.close();
                             return isDark;
                         }
                     }
                 }
                 reader.close();
+                mLog.warn("Could not find AppsUseLightTheme registry value - defaulting to light mode");
             }
             else
             {
@@ -129,7 +137,7 @@ public class ColorThemePreference extends Preference
         }
         catch(Exception e)
         {
-            mLog.warn("Could not detect system theme, defaulting to light mode", e);
+            mLog.error("Exception while detecting system theme - defaulting to light mode", e);
         }
         
         // Default to light mode if detection fails or not on Windows
