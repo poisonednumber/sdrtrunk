@@ -32,6 +32,7 @@ import org.slf4j.LoggerFactory;
 public class ColorThemePreference extends Preference
 {
     private static final String PREFERENCE_KEY_DARK_MODE_ENABLED = "color.theme.dark.mode.enabled";
+    private static final String PREFERENCE_KEY_USER_SET = "color.theme.user.set";
     
     private final static Logger mLog = LoggerFactory.getLogger(ColorThemePreference.class);
     private Preferences mPreferences = Preferences.userNodeForPackage(ColorThemePreference.class);
@@ -54,16 +55,85 @@ public class ColorThemePreference extends Preference
 
     /**
      * Indicates if dark mode is enabled.
+     * On first run, automatically detects Windows system theme.
      * @return true if dark mode is enabled.
      */
     public boolean isDarkModeEnabled()
     {
         if(mDarkModeEnabled == null)
         {
-            mDarkModeEnabled = mPreferences.getBoolean(PREFERENCE_KEY_DARK_MODE_ENABLED, false);
+            // Check if user has explicitly set the preference
+            boolean userHasSet = mPreferences.getBoolean(PREFERENCE_KEY_USER_SET, false);
+            
+            if(!userHasSet)
+            {
+                // First time - detect system theme and use as default
+                boolean systemDarkMode = isSystemInDarkMode();
+                mDarkModeEnabled = systemDarkMode;
+                mLog.info("First run - detected Windows system theme: " + (systemDarkMode ? "Dark" : "Light"));
+            }
+            else
+            {
+                // User has set preference before - use saved value
+                mDarkModeEnabled = mPreferences.getBoolean(PREFERENCE_KEY_DARK_MODE_ENABLED, false);
+            }
         }
 
         return mDarkModeEnabled;
+    }
+    
+    /**
+     * Detects if Windows is in dark mode by checking the registry.
+     * @return true if Windows is in dark mode, false otherwise or if detection fails.
+     */
+    private boolean isSystemInDarkMode()
+    {
+        try
+        {
+            String os = System.getProperty("os.name").toLowerCase();
+            
+            if(os.contains("win"))
+            {
+                // Check Windows registry for dark mode setting
+                // HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize\AppsUseLightTheme
+                // 0 = Dark mode, 1 = Light mode
+                Process process = Runtime.getRuntime().exec(
+                    "reg query HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize /v AppsUseLightTheme");
+                
+                java.io.BufferedReader reader = new java.io.BufferedReader(
+                    new java.io.InputStreamReader(process.getInputStream()));
+                
+                String line;
+                while((line = reader.readLine()) != null)
+                {
+                    if(line.contains("AppsUseLightTheme"))
+                    {
+                        // Extract the value (0 or 1)
+                        String[] parts = line.trim().split("\\s+");
+                        if(parts.length >= 3)
+                        {
+                            String value = parts[parts.length - 1];
+                            // 0 = Dark mode, 1 = Light mode
+                            boolean isDark = "0x0".equals(value);
+                            mLog.info("Windows AppsUseLightTheme registry value: " + value + " (Dark mode: " + isDark + ")");
+                            return isDark;
+                        }
+                    }
+                }
+                reader.close();
+            }
+            else
+            {
+                mLog.info("Non-Windows OS detected: " + os + " - defaulting to light mode");
+            }
+        }
+        catch(Exception e)
+        {
+            mLog.warn("Could not detect system theme, defaulting to light mode", e);
+        }
+        
+        // Default to light mode if detection fails or not on Windows
+        return false;
     }
 
     /**
@@ -74,6 +144,8 @@ public class ColorThemePreference extends Preference
     {
         mDarkModeEnabled = enabled;
         mPreferences.putBoolean(PREFERENCE_KEY_DARK_MODE_ENABLED, enabled);
+        // Mark that user has explicitly set this preference
+        mPreferences.putBoolean(PREFERENCE_KEY_USER_SET, true);
         notifyPreferenceUpdated();
     }
 }
